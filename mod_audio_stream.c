@@ -12,6 +12,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load);
 
 SWITCH_MODULE_DEFINITION(mod_audio_stream, mod_audio_stream_load, mod_audio_stream_shutdown, NULL /*mod_audio_stream_runtime*/);
 
+
 static void responseHandler(switch_core_session_t *session, const char *eventName, const char *json)
 {
     switch_event_t *event;
@@ -335,6 +336,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
     switch_console_set_complete("add uuid_audio_stream start wss-url");
     switch_console_set_complete("add uuid_audio_stream stop");
 
+    set_netsystem(true);
+
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_audio_stream API successfully loaded\n");
 
     /* indicate that the module should continue to be loaded */
@@ -346,6 +349,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
   Macro expands to: switch_status_t mod_audio_stream_shutdown() */
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_audio_stream_shutdown)
 {
+    set_netsystem(false);
+
     switch_event_free_subclass(EVENT_JSON);
     switch_event_free_subclass(EVENT_CONNECT);
     switch_event_free_subclass(EVENT_DISCONNECT);

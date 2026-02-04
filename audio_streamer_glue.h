@@ -13,4 +13,6 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
 switch_bool_t stream_frame(switch_media_bug_t *bug);
 switch_status_t stream_session_cleanup(switch_core_session_t *session, char *text, int channelIsClosing);
 
+void set_netsystem(bool init);
+
 #endif // AUDIO_STREAMER_GLUE_H

@@ -5,26 +5,48 @@ A FreeSWITCH module that streams L16 audio from a channel to a websocket endpoin
 #### About
 
 - The purpose of `mod_audio_stream` was to make a simple, less dependent but yet effective module to stream audio and receive responses from websocket server. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), c++ library for websocket protocol which is compiled as a static library.
-- This module was inspired by [mod_audio_fork](https://github.com/drachtio/drachtio-freeswitch-modules/tree/main/modules/mod_audio_fork).
+- The original module was inspired by [mod_audio_fork](https://github.com/drachtio/drachtio-freeswitch-modules/tree/main/modules/mod_audio_fork).
 
 ## Installation
 
 ### Dependencies
-It requires `libfreeswitch-dev`, `libssl-dev`, `zlib1g-dev` and `libspeexdsp-dev` on Debian/Ubuntu which are regular packages for Freeswitch installation.
-### Building
-After cloning please execute: **git submodule init** and **git submodule update** to initialize the submodule.
-#### Custom path
-If you built FreeSWITCH from source, eq. install dir is /usr/local/freeswitch, add path to pkgconfig:
+This module uses the freeswitch library (under windows they are freeswitchcore.link and freeswitch.dll) [to be continued]
+
+The other dependencies are injected via vcpkg
+[if you don't have vcpkg, install it, like:
+git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat]
+
+[In the following c:\vcpkg is supposed as vcpkg dir]
+
+The other dependencies:
+speexdsp:
+.\vcpkg.exe install speexdsp:x64-windows
+
+ixwebsocket:
+.\vcpkg.exe install ixwebsocket:x64-windows
+
+mbedtls:
+.\vcpkg install mbedtls:x64-windows
+
+
+### To build the module, from the cloned repository directory:
 ```
-export PKG_CONFIG_PATH=/usr/local/freeswitch/lib/pkgconfig
-```
-To build the module, from the cloned repository directory:
-```
+Set up the project (if it is not set already):
+
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make
-sudo make install
-```
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=<vcpkg dir>/scripts/buildsystems/vcpkg.cmake -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DFREESWITCH_INCLUDE_DIR="<fs dir>\src\include" -DFREESWITCH_CORE_LIB="<fs dir>\x64\Release\freeswitchcore.lib" -DSPEEXDSP_INCLUDE_DIR="<vcpkg dir>/installed/x64-windows/include" -DSPEEXDSP_LIB="<vcpkg dir>/installed/x64-windows/lib/speexdsp.lib" -DFREESWITCH_MODULES_DIR="<target dir>"
+
+[In my case:
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DFREESWITCH_INCLUDE_DIR="d:\GitSecondary\fs_experiment_github\src\include" -DFREESWITCH_CORE_LIB="d:\GitSecondary\fs_experiment_github\x64\Release\freeswitchcore.lib" -DSPEEXDSP_INCLUDE_DIR="C:/vcpkg/installed/x64-windows/include" -DSPEEXDSP_LIB="C:/vcpkg/installed/x64-windows/lib/speexdsp.lib" -DFREESWITCH_MODULES_DIR="d:\GitSecondary\fs_experiment_github/mod"]
+
+
+To compile and build, run:
+
+cmake --build build --config Release --verbose
+
+
 
 ### TCP streaming
 

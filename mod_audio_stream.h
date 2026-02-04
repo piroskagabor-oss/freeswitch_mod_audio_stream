@@ -1,6 +1,10 @@
 #ifndef MOD_AUDIO_STREAM_H
 #define MOD_AUDIO_STREAM_H
 
+#ifndef SWITCH_MODULE_EXPORTS
+#define SWITCH_MODULE_EXPORTS 1
+#endif
+
 #include <switch.h>
 #include <speex/speex_resampler.h>
 #include "buffer/ringbuffer.h"

@@ -1,7 +1,44 @@
 #include <string>
 #include <cstring>
+#include <iostream>
+#include <limits>
+#include <cstdint>
+#include <vector>
+
+// --- cross-platform socket includes ---------------------------------------
+#ifdef _WIN32
+
+#ifndef NOMINMAX
+  #define NOMINMAX
+#endif
+
+#ifndef _WIN32_WINNT
+  #define _WIN32_WINNT 0x0601  // Windows 7, Server 2008 R2; change to 0x0A00 for Win10 if desired
+#endif
+
+// winsock2 must come before windows.h and before any header that pulls in winsock.h
+#ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
+// Linker: ensure Ws2_32.lib is linked (CMake: target_link_libraries(... Ws2_32 ...))
+#else
+// POSIX platforms
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#endif
+
+
+
 #include "mod_audio_stream.h"
 #include <ixwebsocket/IXWebSocket.h>
+#include <ixwebsocket/IXNetSystem.h>
 
 #include <switch_json.h>
 #include <fstream>
@@ -9,11 +46,6 @@
 #include <unordered_set>
 #include "base64.h"
 
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <iostream>
-#include <stdlib.h>
 
 #include <chrono>
 #include <thread>
@@ -24,6 +56,42 @@
 namespace
 {
     extern switch_bool_t filter_json_string(switch_core_session_t *session, const char *message);
+}
+
+static std::atomic<bool> g_ix_inited{false};
+
+static int send_all(SOCKET sock, const uint8_t *data, size_t len, int flags = 0) {
+    if (!data) return SOCKET_ERROR;
+    if (len == 0) return 0;
+
+    if (len > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        // Too large to send in one call - decide how to handle it.
+        // We will send in loop-sized chunks.
+    }
+
+    size_t total_sent = 0;
+    while (total_sent < len) {
+        size_t remaining = len - total_sent;
+        int to_send = (remaining > static_cast<size_t>(std::numeric_limits<int>::max()))
+                          ? std::numeric_limits<int>::max()
+                          : static_cast<int>(remaining);
+
+        int sent = ::send(sock,
+                          reinterpret_cast<const char*>(data + total_sent),
+                          to_send,
+                          flags);
+        if (sent == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            return SOCKET_ERROR;
+        }
+        if (sent == 0) {
+            // peer closed connection
+            break;
+        }
+        total_sent += static_cast<size_t>(sent);
+    }
+
+    return static_cast<int>(total_sent); // or return 0 on success; keep as bytes-sent for clarity
 }
 
 class BaseStreamer
@@ -39,15 +107,17 @@ public:
     virtual ~BaseStreamer() = default;
 };
 
-class AudioStreamer : public BaseStreamer
+class SimpleStreamer : public BaseStreamer
 {
 public:
-    AudioStreamer(const char *uuid, const char *wsUri, responseHandler_t callback, int deflate, int heart_beat, const char *initialMeta,
-                  bool globalTrace, bool suppressLog, const char *extra_headers)
+    SimpleStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat, const char* initialMeta,
+        bool globalTrace, bool suppressLog, const char* extra_headers)
         : m_sessionId(uuid), m_notify(callback), m_initial_meta(initialMeta),
-          m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0)
-    {
+        m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0)
 
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "SimpleStreamer starting...\n");
         ix::WebSocketHttpHeaders headers;
         if (m_extra_headers)
         {
@@ -67,6 +137,100 @@ public:
             }
         }
 
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer set up url %s\n", wsUri);
+
+
+
+    }
+    void disconnect() override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : disconnecting...\n");
+    }
+
+    bool isConnected() override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : connected...\n");
+        return true;
+    }
+
+    void writeBinary(uint8_t *buffer, size_t len) override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : write...\n");
+    }
+
+    void writeText(const char *text) override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : write text...\n");
+    }
+    void eventCallback(notifyEvent_t event, const char* message) override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : callback...\n");
+    }
+    switch_bool_t processMessage(switch_core_session_t* session, std::string& message) override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : process...\n");
+        cJSON* json = cJSON_Parse(message.c_str());
+        switch_bool_t status = SWITCH_FALSE;
+        return status;
+    }
+    void deleteFiles() override
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "SimpleStreamer : delete...\n");
+    }
+private:
+    std::string m_sessionId;
+    responseHandler_t m_notify;
+    ix::WebSocket webSocket;
+    const char *m_initial_meta;
+    bool m_suppress_log;
+    bool m_global_trace;
+    const char *m_extra_headers;
+    int m_playFile;
+    std::unordered_set<std::string> m_Files;
+
+
+};
+
+class AudioStreamer : public BaseStreamer
+{
+public:
+    AudioStreamer(const char *uuid, const char *wsUri, responseHandler_t callback, int deflate, int heart_beat, const char *initialMeta,
+                  bool globalTrace, bool suppressLog, const char *extra_headers)
+        //: m_sessionId(uuid), m_notify(callback), m_initial_meta(initialMeta),
+        //m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0)
+        :m_global_trace(globalTrace), m_suppress_log(suppressLog), m_playFile(0)
+    {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer starting...\n");
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer starting %s\n", m_initial_meta);
+        m_sessionId = uuid;
+        m_notify = callback;
+        m_initial_meta = initialMeta;
+        m_extra_headers = extra_headers;
+        ix::WebSocketHttpHeaders headers;
+        if (m_extra_headers)
+        {
+            cJSON *headers_json = cJSON_Parse(m_extra_headers);
+            if (headers_json)
+            {
+                cJSON *iterator = headers_json->child;
+                while (iterator)
+                {
+                    if (iterator->type == cJSON_String && iterator->valuestring != nullptr)
+                    {
+                        headers[iterator->string] = iterator->valuestring;
+                    }
+                    iterator = iterator->next;
+                }
+                cJSON_Delete(headers_json);
+            }
+        }
+
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer set up url %s\n", wsUri);
+
         webSocket.setUrl(wsUri);
 
         // Optional heart beat, sent every xx seconds when there is not any traffic
@@ -82,11 +246,16 @@ public:
         if (!headers.empty())
             webSocket.setExtraHeaders(headers);
 
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer webSocket.setOnMessageCallback\n");
+
         // Setup a callback to be fired when a message or an event (open, close, error) is received
         webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr &msg)
                                        {
             if (msg->type == ix::WebSocketMessageType::Message)
             {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+                    "AudioStreamer eventCallback\n");
                 eventCallback(MESSAGE, msg->str.c_str());
 
             } else if (msg->type == ix::WebSocketMessageType::Open)
@@ -95,6 +264,8 @@ public:
                 root = cJSON_CreateObject();
                 cJSON_AddStringToObject(root, "status", "connected");
                 char *json_str = cJSON_PrintUnformatted(root);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+                    "AudioStreamer eventCallback 2\n");
 
                 eventCallback(CONNECT_SUCCESS, json_str);
 
@@ -116,6 +287,8 @@ public:
                 cJSON_AddItemToObject(root, "message", message);
 
                 char *json_str = cJSON_PrintUnformatted(root);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+                    "AudioStreamer eventCallback3\n");
 
                 eventCallback(CONNECT_ERROR, json_str);
 
@@ -134,6 +307,8 @@ public:
                 cJSON_AddStringToObject(message, "reason", msg->closeInfo.reason.c_str());
                 cJSON_AddItemToObject(root, "message", message);
                 char *json_str = cJSON_PrintUnformatted(root);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+                    "AudioStreamer eventCallback4\n");
 
                 eventCallback(CONNECTION_DROPPED, json_str);
 
@@ -142,7 +317,12 @@ public:
             } });
 
         // Now that our callback is setup, we can start our background thread and receive messages
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer webSocket.start\n");
+
         webSocket.start();
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+            "AudioStreamer webSocket.started\n");
     }
 
     static void media_bug_close(switch_core_session_t *session)
@@ -570,7 +750,7 @@ public:
                 std::this_thread::sleep_for(sleep_time);
             }
 
-            ssize_t bytes_sent = send(m_socket, buffer, len, 0);
+            ssize_t bytes_sent = send_all(m_socket, buffer, len, 0);
 
             if (bytes_sent == -1)
             {
@@ -676,7 +856,14 @@ namespace
         else
         {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: initiate WS streamer\n");
-            auto *as = new AudioStreamer(tech_pvt->sessionId, address, responseHandler, deflate, heart_beat, metadata, globalTrace, suppressLog, extra_headers);
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: initiate WS streamer %s\n", metadata);
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: initiate WS streamer %s\n", address);
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: initiate WS streamer %s\n", extra_headers);
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: initiate WS streamer %s\n", tech_pvt->sessionId);
+            //auto* as = new AudioStreamer(tech_pvt->sessionId, address, responseHandler, deflate, heart_beat, (metadata ? metadata : ""), globalTrace, suppressLog, (extra_headers ? extra_headers : ""));
+            auto* as = new AudioStreamer(tech_pvt->sessionId, address, responseHandler, deflate, heart_beat, metadata, globalTrace, suppressLog, extra_headers);
+            //auto* as = new SimpleStreamer(tech_pvt->sessionId, address, responseHandler, deflate, heart_beat, (metadata ? metadata : ""), globalTrace, suppressLog, "");
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init: WS streamer inited\n");
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
         }
 
@@ -1103,10 +1290,16 @@ extern "C"
                     if (ringBufferLen(tech_pvt->buffer) >= FRAME_SIZE_8000 * tech_pvt->sampling / 8000 * tech_pvt->channels * 2)
                     {
                         size_t nFrames = ringBufferLen(tech_pvt->buffer);
-                        uint8_t chunkPtr[nFrames];
-                        ringBufferGetMultiple(tech_pvt->buffer, chunkPtr, nFrames);
 
-                        strcmp(STREAM_TYPE, "TCP") == 0 ? pTcpStreamer->writeBinary(chunkPtr, nFrames) : pAudioStreamer->writeBinary(chunkPtr, nFrames);
+                        if (nFrames == 0) {
+                            // nothing to do
+                        } else {
+                            std::vector<uint8_t> chunkPtr(nFrames);
+                            ringBufferGetMultiple(tech_pvt->buffer, chunkPtr.data(), nFrames);
+                            // use chunkPtr.data() / chunkPtr.size() as before
+                            strcmp(STREAM_TYPE, "TCP") == 0 ? pTcpStreamer->writeBinary(chunkPtr.data(), nFrames) : pAudioStreamer->writeBinary(chunkPtr.data(), nFrames);
+                        }
+
                         ringBufferClear(tech_pvt->buffer);
                     }
                 }
@@ -1153,5 +1346,24 @@ extern "C"
 
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "stream_session_cleanup: no bug - websocket connection already closed\n");
         return SWITCH_STATUS_FALSE;
+    }
+    void set_netsystem(bool init)
+    {
+        if (init)
+        {
+            if (!g_ix_inited.exchange(true))
+            {
+                ix::initNetSystem();   // WSAStartup
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "NetSystem inited\n");
+            }
+        }
+        else
+        {
+            if (g_ix_inited.exchange(false))
+            {
+                ix::uninitNetSystem(); // WSACleanup
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "NetSystem uninited\n");
+            }
+        }
     }
 }
