@@ -112,16 +112,16 @@ class SimpleStreamer : public BaseStreamer
 public:
     SimpleStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat, const char* initialMeta,
         bool globalTrace, bool suppressLog, const char* extra_headers)
-        : m_sessionId(uuid), m_notify(callback), m_initial_meta(initialMeta),
-        m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0)
+        : m_sessionId(uuid), m_notify(callback), m_initial_meta(initialMeta ? initialMeta : ""),
+        m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers ? extra_headers : ""), m_playFile(0)
 
     {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
             "SimpleStreamer starting...\n");
         ix::WebSocketHttpHeaders headers;
-        if (m_extra_headers)
+        if (!m_extra_headers.empty())
         {
-            cJSON *headers_json = cJSON_Parse(m_extra_headers);
+            cJSON *headers_json = cJSON_Parse(m_extra_headers.c_str());
             if (headers_json)
             {
                 cJSON *iterator = headers_json->child;
@@ -182,10 +182,10 @@ private:
     std::string m_sessionId;
     responseHandler_t m_notify;
     ix::WebSocket webSocket;
-    const char *m_initial_meta;
+    std::string m_initial_meta;
     bool m_suppress_log;
     bool m_global_trace;
-    const char *m_extra_headers;
+    std::string m_extra_headers;
     int m_playFile;
     std::unordered_set<std::string> m_Files;
 
@@ -197,22 +197,15 @@ class AudioStreamer : public BaseStreamer
 public:
     AudioStreamer(const char *uuid, const char *wsUri, responseHandler_t callback, int deflate, int heart_beat, const char *initialMeta,
                   bool globalTrace, bool suppressLog, const char *extra_headers)
-        //: m_sessionId(uuid), m_notify(callback), m_initial_meta(initialMeta),
-        //m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0)
-        :m_global_trace(globalTrace), m_suppress_log(suppressLog), m_playFile(0)
+        : m_sessionId(uuid ? uuid : ""), m_notify(callback), m_initial_meta(initialMeta ? initialMeta : ""),
+        m_global_trace(globalTrace), m_suppress_log(suppressLog), m_extra_headers(extra_headers ? extra_headers : ""), m_playFile(0)
     {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
-            "AudioStreamer starting...\n");
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
-            "AudioStreamer starting %s\n", m_initial_meta);
-        m_sessionId = uuid;
-        m_notify = callback;
-        m_initial_meta = initialMeta;
-        m_extra_headers = extra_headers;
+            "AudioStreamer starting %s\n", m_initial_meta.c_str());
         ix::WebSocketHttpHeaders headers;
-        if (m_extra_headers)
+        if (!m_extra_headers.empty())
         {
-            cJSON *headers_json = cJSON_Parse(m_extra_headers);
+            cJSON *headers_json = cJSON_Parse(m_extra_headers.c_str());
             if (headers_json)
             {
                 cJSON *iterator = headers_json->child;
@@ -341,11 +334,11 @@ public:
             switch (event)
             {
             case CONNECT_SUCCESS:
-                if (m_initial_meta && strlen(m_initial_meta) > 0)
+                if (!m_initial_meta.empty())
                 {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(psession), SWITCH_LOG_DEBUG,
-                                      "sending initial metadata %s\n", m_initial_meta);
-                    writeText(m_initial_meta);
+                                      "sending initial metadata %s\n", m_initial_meta.c_str());
+                    writeText(m_initial_meta.c_str());
                 }
                 m_notify(psession, EVENT_CONNECT, message);
                 break;
@@ -493,10 +486,10 @@ private:
     std::string m_sessionId;
     responseHandler_t m_notify;
     ix::WebSocket webSocket;
-    const char *m_initial_meta;
+    std::string m_initial_meta;
     bool m_suppress_log;
     bool m_global_trace;
-    const char *m_extra_headers;
+    std::string m_extra_headers;
     int m_playFile;
     std::unordered_set<std::string> m_Files;
 };
@@ -506,13 +499,13 @@ class TcpStreamer : public BaseStreamer
 public:
     TcpStreamer(const char *uuid, const char *address, int port, const char *initialMeta,
                 bool globalTrace, bool suppressLog, responseHandler_t callback, int samplingRate, int channels)
-        : m_sessionId(uuid), m_address(address), m_port(port), m_notify(callback), m_initial_meta(initialMeta),
-          m_global_trace(globalTrace), m_suppress_log(suppressLog), m_socket(-1), m_playFile(0), m_samplingRate(samplingRate), m_channels(channels)
+        : m_sessionId(uuid), m_address(address ? address : ""), m_port(port), m_notify(callback), m_initial_meta(initialMeta ? initialMeta : ""),
+          m_global_trace(globalTrace), m_suppress_log(suppressLog), m_socket(INVALID_SOCKET), m_playFile(0), m_samplingRate(samplingRate), m_channels(channels)
     {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "TcpStreamer: Initializing TCP connection to %s:%d\n", address, port);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "TcpStreamer: Initializing TCP connection to %s:%d\n", m_address.c_str(), port);
 
         m_socket = socket(AF_INET, SOCK_STREAM, 0);
-        if (m_socket == -1)
+        if (m_socket == INVALID_SOCKET)
         {
             std::cerr << "Could not create socket" << std::endl;
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "TcpStreamer: Could not create socket\n");
@@ -520,7 +513,7 @@ public:
         }
 
         struct sockaddr_in server;
-        server.sin_addr.s_addr = inet_addr(address);
+        server.sin_addr.s_addr = inet_addr(m_address.c_str());
         server.sin_family = AF_INET;
         server.sin_port = htons(port);
 
@@ -530,7 +523,7 @@ public:
         {
             std::cerr << "Connection failed" << std::endl;
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "TcpStreamer: Connection to %s:%d failed\n", address, port);
-            close(m_socket);
+            close_my_socket();
 
             cJSON *root, *message;
             root = cJSON_CreateObject();
@@ -545,7 +538,7 @@ public:
             cJSON_Delete(root);
             switch_safe_free(json_str);
 
-            m_socket = -1;
+            m_socket = INVALID_SOCKET;
             return;
         }
 
@@ -641,7 +634,7 @@ public:
     void disconnect() override
     {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "disconnecting...\n");
-        close(m_socket);
+        close_my_socket();
     }
 
     static void media_bug_close(switch_core_session_t *session)
@@ -700,9 +693,9 @@ public:
 
     ~TcpStreamer()
     {
-        if (m_socket != -1)
+        if (m_socket != INVALID_SOCKET)
         {
-            close(m_socket);
+            close_my_socket();
 
             cJSON *root, *message;
             root = cJSON_CreateObject();
@@ -724,7 +717,7 @@ public:
 
     bool isConnected() override
     {
-        return m_socket != -1;
+        return m_socket != INVALID_SOCKET;
     }
 
     void writeText(const char *text) override
@@ -764,16 +757,24 @@ public:
     }
 
 private:
+    int close_my_socket()
+    {
+#ifdef _WIN32
+        return closesocket(m_socket);
+#else
+        return close(m_socket);
+#endif
+    }
     std::string m_sessionId;
-    const char *m_address;
+    std::string m_address;
     int m_port;
     responseHandler_t m_notify;
-    const char *m_initial_meta;
+    std::string m_initial_meta;
     bool m_suppress_log;
     bool m_global_trace;
     int m_playFile;
     std::unordered_set<std::string> m_Files;
-    int m_socket;
+    SOCKET m_socket;
     int m_samplingRate;
     int m_channels;
 };
@@ -1315,14 +1316,23 @@ extern "C"
         auto *bug = (switch_media_bug_t *)switch_channel_get_private(channel, MY_BUG_NAME);
         if (bug)
         {
+
+            // Atomically remove the bug from channel to prevent double cleanup
+            switch_channel_set_private(channel, MY_BUG_NAME, nullptr);
+
             auto *tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
+            if (!tech_pvt)
+            {
+                return SWITCH_STATUS_FALSE;
+            }
+
             char sessionId[MAX_SESSION_ID];
             strcpy(sessionId, tech_pvt->sessionId);
 
             switch_mutex_lock(tech_pvt->mutex);
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) stream_session_cleanup\n", sessionId);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+                "(%s) stream_session_cleanup\n", sessionId);
 
-            switch_channel_set_private(channel, MY_BUG_NAME, nullptr);
             if (!channelIsClosing)
             {
                 switch_core_media_bug_remove(session, &bug);
@@ -1338,13 +1348,18 @@ extern "C"
                 finish(tech_pvt);
             }
 
+            switch_mutex_unlock(tech_pvt->mutex);  // Unlock BEFORE destroying
+
             destroy_tech_pvt(tech_pvt);
 
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "(%s) stream_session_cleanup: connection closed\n", sessionId);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
+                "(%s) stream_session_cleanup: connection closed\n", sessionId);
             return SWITCH_STATUS_SUCCESS;
         }
 
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "stream_session_cleanup: no bug - websocket connection already closed\n");
+        // Already cleaned up by another thread
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+            "stream_session_cleanup: no bug - already cleaned up\n");
         return SWITCH_STATUS_FALSE;
     }
     void set_netsystem(bool init)
