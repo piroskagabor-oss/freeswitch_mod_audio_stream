@@ -732,6 +732,9 @@ public:
             // Calculate the expected interval based on the sample rate and channels
             double expected_interval = static_cast<double>(len) / (m_samplingRate * m_channels * 2); // 2 bytes per sample for 16-bit audio
 
+            // static variable is shared across all TcpStreamer instances -> causing incorrect timing when multiple streams are active.
+            // should make it a member variable, and init it at the first writeBinary call (use a bool last_send_time_inited flag)
+            // but it doesn't matter, we'll do it later, now we use only AudioStreamer.
             static auto last_send_time = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
 
@@ -834,17 +837,17 @@ namespace
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream_data_init sampling: %u, desiredSampling: %u, channels: %d\n", sampling, desiredSampling, channels);
 
         memset(tech_pvt, 0, sizeof(private_t));
-
-        strncpy(tech_pvt->sessionId, switch_core_session_get_uuid(session), MAX_SESSION_ID);
-        strncpy(tech_pvt->ws_uri, address, MAX_WS_URI); // Fixed to use address instead of undefined wsUri
+        //use _snprintf_s instead of strncpy, to ensure closing 0 (fs's switch_copy_string can be used too)
+        _snprintf_s(tech_pvt->sessionId, MAX_SESSION_ID, _TRUNCATE, "%s", switch_core_session_get_uuid(session));
+        _snprintf_s(tech_pvt->ws_uri, MAX_WS_URI, _TRUNCATE, "%s", address);
         tech_pvt->sampling = desiredSampling;
         tech_pvt->responseHandler = responseHandler;
         tech_pvt->rtp_packets = rtp_packets;
         tech_pvt->channels = channels;
         tech_pvt->audio_paused = 0;
 
-        if (metadata)
-            strncpy(tech_pvt->initialMetadata, metadata, MAX_METADATA_LEN);
+        if (metadata) _snprintf_s(tech_pvt->initialMetadata, MAX_METADATA_LEN, _TRUNCATE, "%s", metadata);
+        else tech_pvt->initialMetadata[0] = '\0';
 
         size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * BUFFERIZATION_INTERVAL_MS / 20);
 
@@ -1019,7 +1022,8 @@ extern "C"
         }
 
         // Copy valid URI to wsUri
-        std::strncpy(wsUri, url, MAX_WS_URI);
+        //std::strncpy(wsUri, url, MAX_WS_URI);
+        _snprintf_s(wsUri, MAX_WS_URI, _TRUNCATE, "%s", url);
         return 1;
     }
 

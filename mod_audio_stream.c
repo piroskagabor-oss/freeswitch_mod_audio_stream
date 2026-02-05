@@ -326,7 +326,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
     if (switch_event_reserve_subclass(EVENT_JSON) != SWITCH_STATUS_SUCCESS ||
         switch_event_reserve_subclass(EVENT_CONNECT) != SWITCH_STATUS_SUCCESS ||
         switch_event_reserve_subclass(EVENT_ERROR) != SWITCH_STATUS_SUCCESS ||
-        switch_event_reserve_subclass(EVENT_DISCONNECT) != SWITCH_STATUS_SUCCESS)
+        switch_event_reserve_subclass(EVENT_DISCONNECT) != SWITCH_STATUS_SUCCESS ||
+        switch_event_reserve_subclass(EVENT_PLAY) != SWITCH_STATUS_SUCCESS)
     {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't register an event subclass for mod_audio_stream API.\n");
         return SWITCH_STATUS_TERM;
@@ -355,6 +356,7 @@ SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_audio_stream_shutdown)
     switch_event_free_subclass(EVENT_CONNECT);
     switch_event_free_subclass(EVENT_DISCONNECT);
     switch_event_free_subclass(EVENT_ERROR);
+    switch_event_free_subclass(EVENT_PLAY);
 
     return SWITCH_STATUS_SUCCESS;
 }
